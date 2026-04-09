@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-page: #f8f7f4;
+  --bg-card: #ffffff;
+  --text-primary: #1a1a2e;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --border-light: #f1f5f9;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  color: var(--text-primary);
+  background-color: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 卡片区块 */
+.card-section {
+  @apply bg-white rounded-2xl p-5 sm:p-6 mb-3 shadow-card border border-gray-50/80;
+}
+
+.card-section-title {
+  @apply text-base font-semibold mb-4 text-gray-800 tracking-tight;
+}
+
+/* 城市筛选滚动 */
+.city-scroll::-webkit-scrollbar { display: none; }
+.city-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* 价格标签 */
+.price-tag {
+  @apply inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold tracking-wide;
+  @apply bg-studio-50 text-studio-600;
+}
+
+/* 标签通用 */
+.tag {
+  @apply text-xs px-2 py-0.5 rounded-md font-medium;
+}
+
+/* 滚动容器 */
+.scroll-container {
+  @apply overflow-x-auto snap-x snap-mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-container::-webkit-scrollbar { display: none; }
+
+/* 渐入动画 */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.3s ease-out forwards;
+}
+
+/* 浮动动画 */
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-15px) rotate(3deg); }
+}
+@keyframes floatGentle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* 卡片悬浮效果 */
+.card-lift {
+  @apply transition-all duration-200 ease-out;
+}
+.card-lift:hover {
+  @apply shadow-card-hover -translate-y-0.5;
+}
+
+/* 输入框统一样式 */
+.input-field {
+  @apply w-full px-3.5 py-2.5 bg-gray-50 border-0 rounded-xl text-sm;
+  @apply focus:outline-none focus:ring-2 focus:ring-podcast-200 focus:bg-white;
+  @apply placeholder:text-gray-300;
+  transition: all 0.15s ease;
+}
+
+/* 按钮基础 */
+.btn-primary {
+  @apply px-5 py-2.5 text-sm font-medium text-white rounded-xl;
+  @apply transition-all duration-150 active:scale-[0.98];
+}
+
+/* 底部安全区 */
+.pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
