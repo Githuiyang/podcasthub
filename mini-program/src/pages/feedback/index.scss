@@ -1,0 +1,39 @@
+.page-feedback {
+  min-height: 100vh;
+  background-color: #f9fafb;
+  padding: 32px;
+}
+
+.feedback-card {
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 40px 32px;
+}
+
+.feedback-title {
+  display: block;
+  font-size: 36px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 20px;
+}
+
+.feedback-desc {
+  display: block;
+  font-size: 26px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin-bottom: 32px;
+}
+
+.feedback-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.hint-text {
+  font-size: 24px;
+  color: #9ca3af;
+}

@@ -1,0 +1,294 @@
+/* === Home Page — 发现页（列表优先） === */
+.page-home {
+  min-height: 100vh;
+  background-color: #f9fafb;
+}
+
+/* Header */
+.home-header {
+  padding: 48px 32px 36px;
+  background-color: #111827;
+}
+
+.home-title {
+  display: block;
+  font-size: 44px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 1px;
+}
+
+.home-subtitle {
+  display: block;
+  margin-top: 8px;
+  font-size: 26px;
+  color: #9ca3af;
+}
+
+/* Section */
+.home-section {
+  padding: 32px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 30px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.section-action {
+  font-size: 24px;
+  color: #6b7280;
+}
+
+/* City Grid */
+.city-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.city-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
+  height: 72px;
+  padding: 0 24px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 2px solid #e5e7eb;
+}
+
+.city-item:active {
+  opacity: 0.85;
+}
+
+.city-item--active {
+  background-color: #111827;
+  border-color: #111827;
+}
+
+.city-name {
+  font-size: 26px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.city-name--active {
+  color: #ffffff;
+}
+
+/* Studio List */
+.studio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.studio-card {
+  display: flex;
+  flex-direction: row;
+  background-color: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 2px solid #f3f4f6;
+}
+
+.studio-card:active {
+  opacity: 0.85;
+}
+
+/* Studio Cover */
+.studio-cover {
+  width: 200px;
+  height: 200px;
+  flex-shrink: 0;
+}
+
+.studio-cover--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f3f4f6;
+}
+
+.placeholder-letter {
+  font-size: 48px;
+  font-weight: 700;
+  color: #d1d5db;
+}
+
+/* Studio Body */
+.studio-body {
+  flex: 1;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.studio-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.studio-name {
+  font-size: 28px;
+  font-weight: 600;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Price Badge — pill style */
+.studio-price-badge {
+  flex-shrink: 0;
+  padding: 4px 14px;
+  background-color: #fffbeb;
+  border-radius: 8px;
+}
+
+.price-badge-text {
+  font-size: 22px;
+  font-weight: 600;
+  color: #d97706;
+  white-space: nowrap;
+}
+
+.studio-district {
+  font-size: 22px;
+  color: #6b7280;
+  margin-top: 8px;
+}
+
+.studio-address {
+  font-size: 20px;
+  color: #9ca3af;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Actions */
+.home-actions {
+  padding: 0 32px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88px;
+  border-radius: 14px;
+}
+
+.action-btn:active {
+  opacity: 0.85;
+}
+
+.action-btn--primary {
+  background-color: #111827;
+}
+
+.action-btn--secondary {
+  background-color: #ffffff;
+  border: 2px solid #e5e7eb;
+}
+
+.action-text {
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.action-text--primary {
+  color: #ffffff;
+}
+
+.action-text--secondary {
+  color: #6b7280;
+}
+
+/* Footer */
+.home-footer {
+  padding: 32px;
+  text-align: center;
+}
+
+.footer-text {
+  font-size: 22px;
+  color: #d1d5db;
+}
+
+/* Empty / Error */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 0;
+  gap: 20px;
+}
+
+.empty-text {
+  font-size: 26px;
+  color: #9ca3af;
+}
+
+.retry-btn {
+  padding: 16px 40px;
+  background-color: #111827;
+  border-radius: 10px;
+}
+
+.retry-btn:active {
+  opacity: 0.85;
+}
+
+.retry-text {
+  font-size: 24px;
+  color: #ffffff;
+}
+
+/* Skeleton */
+.city-item--skeleton {
+  min-width: 120px;
+  height: 72px;
+  background-color: #f3f4f6;
+  border: none;
+}
+
+.skeleton-bar {
+  width: 80px;
+  height: 24px;
+  background-color: #e5e7eb;
+  border-radius: 4px;
+}
+
+.studio-card--skeleton {
+  height: 200px;
+  background-color: #f3f4f6;
+  border: none;
+}
+
+.skeleton-block {
+  flex: 1;
+  height: 100%;
+  background-color: #e5e7eb;
+}

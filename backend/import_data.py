@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from models.database import SessionLocal, Studio, init_db
+from services.studio_pricing import infer_charging_method
 
 
 def import_studios():
@@ -93,6 +94,7 @@ def import_studios():
                 room_count=1,
                 price_per_hour=price_per_hour,
                 price_note=price_note or None,
+                charging_method=infer_charging_method(price_note, price_per_hour, None),
                 booking_note=booking_note or None,
                 tags=["播客录音室"] if "录音室" in str(row[0]) else ["播客空间"],
                 is_active=True,

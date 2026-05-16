@@ -1,14 +1,16 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import type { StudioListItem } from '@/lib/types'
+import { getStudioDisplayAddress, getStudioPriceText } from '@/lib/studioPresentation'
 
 interface StudioCardProps {
   studio: StudioListItem
 }
 
 export function StudioCard({ studio }: StudioCardProps) {
-  const location = [studio.city, studio.district].filter(Boolean).join(' · ')
+  const displayAddress = getStudioDisplayAddress(studio)
 
   return (
     <Link href={`/studios/${studio.id}`}>
@@ -16,16 +18,16 @@ export function StudioCard({ studio }: StudioCardProps) {
         {/* 封面区 */}
         <div className="h-40 sm:h-44 bg-gradient-to-br from-studio-100 via-studio-50 to-amber-50 relative">
           {studio.cover_image ? (
-            <img src={studio.cover_image} alt={studio.name} className="w-full h-full object-cover" />
+            <Image src={studio.cover_image} alt={studio.name} fill className="object-cover" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <span className="text-4xl opacity-60">🎙</span>
             </div>
           )}
-          {/* 城市标签 */}
-          {location && (
+          {/* 地址标签 */}
+          {displayAddress && (
             <span className="absolute top-3 left-3 bg-white/85 backdrop-blur-sm text-[11px] font-medium text-gray-600 px-2 py-1 rounded-lg shadow-sm">
-              {location}
+              {displayAddress}
             </span>
           )}
         </div>
@@ -36,18 +38,10 @@ export function StudioCard({ studio }: StudioCardProps) {
             {studio.name}
           </h3>
 
-          {/* 价格 */}
-          <div className="flex items-baseline gap-1.5 mb-2.5">
-            {studio.price_per_hour ? (
-              <>
-                <span className="text-lg font-bold text-studio-600">¥{studio.price_per_hour}</span>
-                <span className="text-[10px] text-gray-400">/小时</span>
-              </>
-            ) : studio.price_per_day ? (
-              <>
-                <span className="text-lg font-bold text-studio-600">¥{studio.price_per_day}</span>
-                <span className="text-[10px] text-gray-400">/天</span>
-              </>
+          {/* 价格 — 使用归一化函数 */}
+          <div className="mb-2.5">
+            {(studio.price_per_hour || studio.price_per_day || studio.charging_method) ? (
+              <span className="text-sm font-bold text-studio-600">{getStudioPriceText(studio)}</span>
             ) : (
               <span className="text-xs text-gray-400">价格详询</span>
             )}

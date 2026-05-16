@@ -13,8 +13,7 @@ if not AMAP_KEY:
     sys.exit(1)
 
 import httpx
-from models.database import SessionLocal, Studio, engine
-from sqlalchemy import text
+from models.database import SessionLocal, Studio
 
 def geocode(address: str, city: str = "") -> tuple:
     """高德地理编码，返回 (longitude, latitude)"""
@@ -32,15 +31,7 @@ def geocode(address: str, city: str = "") -> tuple:
     return None, None
 
 def main():
-    # 给已有表加列（SQLite 兼容方式）
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE studios ADD COLUMN longitude FLOAT"))
-            conn.execute(text("ALTER TABLE studios ADD COLUMN latitude FLOAT"))
-            conn.commit()
-        print("已添加 longitude/latitude 列")
-    except Exception:
-        print("列可能已存在，跳过")
+    print("使用现有 schema 执行地理编码；表结构变更请通过正式 migration 管理。")
 
     db = SessionLocal()
     studios = db.query(Studio).filter(Studio.address.isnot(None)).all()

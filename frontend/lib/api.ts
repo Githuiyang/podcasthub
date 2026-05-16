@@ -4,11 +4,18 @@ import type {
   Editor, EditorListItem,
   BusinessContact, BusinessListItem,
   PaginatedResponse,
+  CityWithCount,
 } from './types'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000'
+function normalizeApiBase(value?: string) {
+  return value?.trim().replace(/\/+$/, '') ?? ''
+}
 
-const api = axios.create({ baseURL: API_BASE })
+export const API_BASE = normalizeApiBase(process.env.NEXT_PUBLIC_API_BASE)
+
+export const api = axios.create({
+  baseURL: API_BASE || undefined,
+})
 
 // ==================== 录音间 ====================
 
@@ -17,7 +24,7 @@ export const studiosApi = {
     api.get<PaginatedResponse<StudioListItem>>('/api/studios/list', { params }),
 
   cities: () =>
-    api.get<string[]>('/api/studios/cities'),
+    api.get<CityWithCount[]>('/api/studios/cities'),
 
   detail: (id: number) =>
     api.get<Studio>(`/api/studios/detail/${id}`),
@@ -30,6 +37,22 @@ export const studiosApi = {
 
   delete: (id: number) =>
     api.delete(`/api/studios/delete/${id}`),
+
+  upload: (id: number, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<Studio>(`/api/studios/${id}/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  uploadQr: (id: number, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{ url: string }>(`/api/studios/${id}/upload-qr`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }
 
 // ==================== 剪辑师 ====================
@@ -52,6 +75,63 @@ export const editorsApi = {
 }
 
 // ==================== 商务 ====================
+
+export const reviewsApi = {
+  create: (data: { studio_id: number; rating?: number; content: string; nickname?: string }) =>
+    api.post('/api/reviews', data),
+
+  list: (studioId: number) =>
+    api.get(`/api/reviews/studio/${studioId}`),
+
+  count: (studioId: number) =>
+    api.get<{ studio_id: number; count: number }>(`/api/reviews/studio/${studioId}/count`),
+
+  counts: () =>
+    api.get<Record<string, number>>('/api/reviews/counts'),
+}
+
+export const changeRequestsApi = {
+  list: (params?: { status?: string; page?: number; size?: number }) =>
+    api.get('/api/change-requests/list', { params }),
+
+  detail: (id: number) =>
+    api.get(`/api/change-requests/detail/${id}`),
+
+  create: (data: { studio_id?: number; request_type: string; source?: string; applicant_name?: string; applicant_note?: string; proposed_data: Record<string, unknown> }) =>
+    api.post('/api/change-requests/create', data),
+
+  approve: (id: number, data?: { review_note?: string }) =>
+    api.put(`/api/change-requests/approve/${id}`, data || {}),
+
+  reject: (id: number, data?: { review_note?: string }) =>
+    api.put(`/api/change-requests/reject/${id}`, data || {}),
+
+  apply: (id: number) =>
+    api.put(`/api/change-requests/apply/${id}`),
+
+  diff: (id: number) =>
+    api.get(`/api/change-requests/diff/${id}`),
+}
+
+// ==================== 飞书同步 ====================
+
+export const feishuSyncApi = {
+  records: () =>
+    api.get<{ count: number; records: Record<string, string>[] }>('/api/feishu-sync/records'),
+
+  compare: () =>
+    api.get<{
+      feishu_count: number
+      online_count: number
+      to_create: Record<string, string>[]
+      to_update: { id: number; name: string; changes: Record<string, { before: string; after: string }> }[]
+      to_delete: { id: number; name: string }[]
+      summary: { create: number; update: number; delete: number; unchanged: number }
+    }>('/api/feishu-sync/compare'),
+
+  apply: (actions: { action: string; studio_id?: number; data?: Record<string, unknown> }[]) =>
+    api.post('/api/feishu-sync/apply', { actions }),
+}
 
 export const businessApi = {
   list: (params?: { business_type?: string; industry?: string; search?: string; page?: number; size?: number }) =>

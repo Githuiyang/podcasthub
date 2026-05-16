@@ -1,28 +1,136 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import Link from 'next/link'
 import { studiosApi } from '@/lib/api'
 import type { Studio, StudioListItem } from '@/lib/types'
+import {
+  getCityHubs,
+  formatDistance,
+  formatTaxiMinutes,
+  getStudioTransitItems,
+} from '@/lib/studioTransport'
+import { getStudioDisplayAddress } from '@/lib/studioPresentation'
+import { extractCityNames } from '@/lib/studioCities'
+import { useCities } from '@/lib/fetcher'
+import dynamic from 'next/dynamic'
+
+const StudioRecruitmentFab = dynamic(() => import('@/app/components/StudioRecruitmentFab').then(m => ({ default: m.StudioRecruitmentFab })), { ssr: false })
+const StudioDetailInfoTab = dynamic(() => import('@/app/components/StudioDetailInfoTab').then(m => ({ default: m.StudioDetailInfoTab })), { ssr: false })
+const StudioDetailImageTab = dynamic(() => import('@/app/components/StudioDetailImageTab').then(m => ({ default: m.StudioDetailImageTab })), { ssr: false })
+const FeedbackModal = dynamic(() => import('@/app/components/FeedbackModal').then(m => ({ default: m.FeedbackModal })), { ssr: false })
 
 const AMAP_KEY = process.env.NEXT_PUBLIC_AMAP_JS_KEY || ''
 
-const CITIES = [
-  { label: '全部', value: '' },
-  { label: '上海', value: '上海' },
-  { label: '北京', value: '北京' },
-  { label: '深圳', value: '深圳' },
-  { label: '广州', value: '广州' },
-  { label: '成都', value: '成都' },
-  { label: '杭州', value: '杭州' },
-]
+// 已知的城市中心坐标（新增城市时追加即可，API 动态城市的 fallback 按录音室坐标平均值计算）
+const CITY_CENTERS: Record<string, [number, number]> = {
+  '上海': [121.47, 31.23],
+  '北京': [116.40, 39.90],
+  '深圳': [114.06, 22.55],
+  '广州': [113.26, 23.13],
+  '成都': [104.07, 30.67],
+  '杭州': [120.15, 30.28],
+  '福州': [119.30, 26.08],
+  '天津': [117.20, 39.13],
+  '景德镇': [117.21, 29.29],
+}
 
-const SHANGHAI_HUBS = [
-  { name: '虹桥机场 / 虹桥火车站', shortName: '虹桥', longitude: 121.3274, latitude: 31.1979 },
-  { name: '上海站', shortName: '上海站', longitude: 121.4626, latitude: 31.2533 },
-  { name: '上海南站', shortName: '南站', longitude: 121.4296, latitude: 31.1547 },
-  { name: '浦东机场', shortName: '浦东', longitude: 121.7998, latitude: 31.1518 },
-] as const
+const NATIONAL_MAP_CENTER: [number, number] = [104.1954, 35.8617]
+const NATIONAL_MAP_ZOOM = 4.8
+
+const STUDIOS_CACHE_PREFIX = 'podcasthub:studios:'
+const STUDIOS_CACHE_TTL = 5 * 60 * 1000
+
+let amapScriptPromise: Promise<void> | null = null
+
+function createAmapScript() {
+  const script = document.createElement('script')
+  script.id = 'amap-script'
+  script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_KEY}`
+  script.async = true
+  script.defer = true
+  return script
+}
+
+function ensureAmapScript(attempt = 0): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve()
+  if ((window as any).AMap) return Promise.resolve()
+  if (!AMAP_KEY) return Promise.reject(new Error('Missing AMap key'))
+
+  if (amapScriptPromise) return amapScriptPromise
+
+  amapScriptPromise = new Promise<void>((resolve, reject) => {
+    let settled = false
+    let script = document.getElementById('amap-script') as HTMLScriptElement | null
+
+    const cleanup = () => {
+      if (!script) return
+      script.removeEventListener('load', handleLoad)
+      script.removeEventListener('error', handleError)
+    }
+
+    const resolveReady = () => {
+      if (!settled) {
+        settled = true
+        cleanup()
+        resolve()
+      }
+    }
+
+    const retryOrReject = (message: string) => {
+      if (settled) return
+      cleanup()
+      amapScriptPromise = null
+
+      if (attempt < 1) {
+        if (script?.parentNode) {
+          script.parentNode.removeChild(script)
+        }
+        ensureAmapScript(attempt + 1).then(resolve).catch(reject)
+      } else {
+        settled = true
+        reject(new Error(message))
+      }
+    }
+
+    const handleLoad = () => {
+      window.setTimeout(() => {
+        if ((window as any).AMap) {
+          resolveReady()
+        } else {
+          retryOrReject('AMap failed to initialize')
+        }
+      }, 120)
+    }
+
+    const handleError = () => {
+      retryOrReject('AMap script failed to load')
+    }
+
+    if (script) {
+      script.addEventListener('load', handleLoad)
+      script.addEventListener('error', handleError)
+
+      // The browser may already have completed the existing script before we attached listeners.
+      window.setTimeout(() => {
+        if ((window as any).AMap) {
+          resolveReady()
+        }
+      }, 0)
+      return
+    }
+
+    script = createAmapScript()
+    script.addEventListener('load', handleLoad)
+    script.addEventListener('error', handleError)
+    document.head.appendChild(script)
+  })
+
+  return amapScriptPromise
+}
+
+function getStudiosCacheKey(city?: string) {
+  return `${STUDIOS_CACHE_PREFIX}${city || 'all'}`
+}
 
 export default function HomePage() {
   const mapContainer = useRef<HTMLDivElement>(null)
@@ -38,23 +146,29 @@ export default function HomePage() {
   const [selectedStudio, setSelectedStudio] = useState<Studio | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [modalLoading, setModalLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'map' | 'editors' | 'business'>('map')
-  const [selectedCity, setSelectedCity] = useState('')
+  const [selectedCity, setSelectedCity] = useState<string | null>(null)
+  const [mapLoading, setMapLoading] = useState(true)
+  const [mapError, setMapError] = useState<string | null>(null)
+  const [studiosLoading, setStudiosLoading] = useState(true)
+  const [activeDetailTab, setActiveDetailTab] = useState<'info' | 'image'>('info')
+  const [studioFeedbackOpen, setStudioFeedbackOpen] = useState(false)
+  const [isMapReady, setIsMapReady] = useState(false)
 
-  // 加载地图脚本
+  // 使用 SWR 缓存城市数据（与列表页共享缓存，自动去重）
+  const { data: citiesData } = useCities()
+  const cities = citiesData ? extractCityNames(citiesData) : []
+
+  // 首次加载时默认选中第一个城市
+  const citiesInitializedRef = useRef(false)
   useEffect(() => {
-    if (activeTab !== 'map') return
-    const existing = document.getElementById('amap-script')
-    if (existing) {
-      initMap()
-      return
+    if (citiesInitializedRef.current || cities.length === 0) return
+    citiesInitializedRef.current = true
+    setSelectedCity(cities[0])
+    if (CITY_CENTERS[cities[0]] && mapRef.current) {
+      mapRef.current.setCenter(CITY_CENTERS[cities[0]])
+      mapRef.current.setZoom(11.5)
     }
-    const script = document.createElement('script')
-    script.id = 'amap-script'
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_KEY}`
-    script.onload = () => initMap()
-    document.head.appendChild(script)
-  }, [activeTab])
+  }, [cities])
 
   const initMap = useCallback(() => {
     if (!mapContainer.current || !(window as any).AMap) return
@@ -64,8 +178,8 @@ export default function HomePage() {
     }
     const AMap = (window as any).AMap
     const map = new AMap.Map(mapContainer.current, {
-      zoom: 12,
-      center: [121.47, 31.23],
+      zoom: 11.5,
+      center: CITY_CENTERS['上海'],  // 合理的初始中心，cities API 返回后按数据调整
       mapStyle: 'amap://styles/whitesmoke',
       viewMode: '2D',
     })
@@ -75,114 +189,15 @@ export default function HomePage() {
     })
     map.on('click', () => hoverInfoRef.current?.close())
     mapRef.current = map
+    setIsMapReady(true)
   }, [])
-
-  const cancelHoverClose = useCallback(() => {
-    if (hoverCloseTimerRef.current) {
-      clearTimeout(hoverCloseTimerRef.current)
-      hoverCloseTimerRef.current = null
-    }
-  }, [])
-
-  const scheduleHoverClose = useCallback(() => {
-    cancelHoverClose()
-    hoverCloseTimerRef.current = setTimeout(() => {
-      hoverInfoRef.current?.close()
-      hoverCloseTimerRef.current = null
-    }, 160)
-  }, [cancelHoverClose])
-
-  useEffect(() => {
-    if (activeTab === 'map') return
-
-    cancelHoverClose()
-    hoverInfoRef.current?.close()
-    hoverInfoRef.current = null
-    markersRef.current = []
-    hubMarkersRef.current = []
-
-    if (mapRef.current) {
-      mapRef.current.destroy()
-      mapRef.current = null
-    }
-  }, [activeTab, cancelHoverClose])
-
-  const escapeMarkerText = useCallback((value: string) => {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
-  }, [])
-
-  const formatDistance = useCallback((distanceKm: number) => {
-    return distanceKm < 1 ? `${Math.round(distanceKm * 1000)}m` : `${distanceKm.toFixed(1)}km`
-  }, [])
-
-  const calculateDistanceKm = useCallback((lng1: number, lat1: number, lng2: number, lat2: number) => {
-    const toRadians = (value: number) => value * Math.PI / 180
-    const earthRadiusKm = 6371
-    const dLat = toRadians(lat2 - lat1)
-    const dLng = toRadians(lng2 - lng1)
-    const a = Math.sin(dLat / 2) ** 2
-      + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) ** 2
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return earthRadiusKm * c
-  }, [])
-
-  const buildStudioHoverContent = useCallback((studio: StudioListItem) => {
-    const location = [studio.city, studio.district].filter(Boolean).join(' · ')
-    const priceText = studio.price_per_hour
-      ? `¥${studio.price_per_hour}/时`
-      : studio.price_per_day
-        ? `¥${studio.price_per_day}/天`
-        : '价格详询'
-
-    const hubDistances = studio.longitude && studio.latitude
-      ? SHANGHAI_HUBS.map(hub => ({
-          ...hub,
-          distanceKm: calculateDistanceKm(studio.longitude as number, studio.latitude as number, hub.longitude, hub.latitude),
-        }))
-      : []
-
-    const hubDistanceHtml = hubDistances.length > 0
-      ? `
-        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.18);">
-          <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #64748b; margin-bottom: 6px;">交通枢纽距离</div>
-          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;">
-            ${hubDistances.map(hub => `
-              <div style="background: #f8fafc; border-radius: 10px; padding: 7px 8px;">
-                <div style="font-size: 11px; color: #1e293b; font-weight: 600; line-height: 1.3;">${escapeMarkerText(hub.shortName)}</div>
-                <div style="font-size: 10px; color: #64748b; margin-top: 2px;">约 ${formatDistance(hub.distanceKm)}</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `
-      : ''
-
-    return `
-      <div style="width: 252px; background: rgba(255,255,255,0.96); border: 1px solid rgba(226,232,240,0.85); border-radius: 18px; box-shadow: 0 18px 50px rgba(15,23,42,0.18); backdrop-filter: blur(18px); padding: 14px 14px 12px; cursor: pointer;">
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-          <div>
-            <div style="font-size: 14px; font-weight: 700; color: #111827; line-height: 1.35;">${escapeMarkerText(studio.name)}</div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">${escapeMarkerText(location || '上海')}</div>
-          </div>
-          <div style="padding: 5px 8px; border-radius: 999px; background: #fff7ed; color: #d97706; font-size: 11px; font-weight: 700; white-space: nowrap;">${escapeMarkerText(priceText)}</div>
-        </div>
-        ${studio.address ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 8px; line-height: 1.45;">${escapeMarkerText(studio.address)}</div>` : ''}
-        ${hubDistanceHtml}
-        <div style="margin-top: 10px; font-size: 11px; font-weight: 600; color: #d97706;">点击卡片查看录音间详情</div>
-      </div>
-    `
-  }, [calculateDistanceKm, escapeMarkerText, formatDistance])
 
   const openStudioModal = useCallback((studio: StudioListItem) => {
     detailRequestIdRef.current += 1
     const requestId = detailRequestIdRef.current
     setSelectedPreview(studio)
     setSelectedStudio(null)
+    setActiveDetailTab('info') // 每次打开都从信息 Tab 开始
     setModalOpen(true)
     setModalLoading(true)
     hoverInfoRef.current?.close()
@@ -205,6 +220,135 @@ export default function HomePage() {
       })
   }, [])
 
+  /** 销毁地图实例和所有关联资源（hover info、定时器、标记） */
+  const destroyMap = useCallback(() => {
+    setIsMapReady(false)
+    // 清除 hover 定时器
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+    // 关闭 hover 弹窗
+    hoverInfoRef.current?.close()
+    hoverInfoRef.current = null
+    // 清除标记引用（地图 destroy 时自动移除，这里只清空 ref）
+    markersRef.current = []
+    hubMarkersRef.current = []
+    // 销毁地图实例
+    if (mapRef.current) {
+      mapRef.current.destroy()
+      mapRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    setMapLoading(true)
+    setMapError(null)
+
+    ensureAmapScript()
+      .then(() => {
+        if (cancelled) return
+        initMap()
+        setMapLoading(false)
+      })
+      .catch((error: Error) => {
+        if (cancelled) return
+        setMapError(error.message || '地图加载失败')
+        setMapLoading(false)
+      })
+
+    // 页面卸载时完整释放地图资源
+    return () => {
+      cancelled = true
+      destroyMap()
+    }
+  }, [initMap, destroyMap])
+
+  const cancelHoverClose = useCallback(() => {
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleHoverClose = useCallback(() => {
+    cancelHoverClose()
+    hoverCloseTimerRef.current = setTimeout(() => {
+      hoverInfoRef.current?.close()
+      hoverCloseTimerRef.current = null
+    }, 160)
+  }, [cancelHoverClose])
+
+  const escapeMarkerText = useCallback((value: string) => {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+  }, [])
+
+  const buildStudioHoverContent = useCallback((studio: StudioListItem) => {
+    const displayAddress = getStudioDisplayAddress(studio)
+    const priceText = studio.price_per_hour
+      ? `¥${studio.price_per_hour}/时`
+      : studio.price_per_day
+        ? `¥${studio.price_per_day}/天`
+        : studio.charging_method || '价格详询'
+
+    const transitItems = getStudioTransitItems(studio)
+
+    const hubDistanceHtml = transitItems.length > 0
+      ? `
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.18);">
+          <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #64748b; margin-bottom: 6px;">交通枢纽距离与打车时间</div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;">
+            ${transitItems.map(hub => `
+              <div style="background: #f8fafc; border-radius: 10px; padding: 7px 8px;">
+                <div style="font-size: 11px; color: #1e293b; font-weight: 600; line-height: 1.3;">${escapeMarkerText(hub.shortName)}</div>
+                <div style="font-size: 10px; color: #64748b; margin-top: 2px;">约 ${formatDistance(hub.distanceKm)}</div>
+                <div style="font-size: 10px; color: #475569; margin-top: 2px;">打车约 ${formatTaxiMinutes(hub.taxiMinutes)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `
+      : ''
+
+    return `
+      <div onmousedown="event.stopPropagation()" onpointerdown="event.stopPropagation()" onmouseenter="window.__podcasthubHoverEnter &amp;&amp; window.__podcasthubHoverEnter()" onmouseleave="window.__podcasthubHoverLeave &amp;&amp; window.__podcasthubHoverLeave()" style="width: 252px; background: rgba(255,255,255,0.96); border: 1px solid rgba(226,232,240,0.85); border-radius: 18px; box-shadow: 0 18px 50px rgba(15,23,42,0.18); backdrop-filter: blur(18px); padding: 14px 14px 12px; cursor: pointer;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <div>
+            <div style="font-size: 14px; font-weight: 700; color: #111827; line-height: 1.35;">${escapeMarkerText(studio.name)}</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">${escapeMarkerText(displayAddress || '地址待补充')}</div>
+          </div>
+          <div style="padding: 5px 8px; border-radius: 999px; background: #fff7ed; color: #d97706; font-size: 11px; font-weight: 700; white-space: nowrap;">${escapeMarkerText(priceText)}</div>
+        </div>
+        ${hubDistanceHtml}
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.18);">
+          <button type="button" onclick="event.stopPropagation(); window.__podcasthubOpenStudio &amp;&amp; window.__podcasthubOpenStudio(${studio.id})" style="width:100%; padding:10px 12px; border-radius:12px; border:0; background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff; font-size:12px; font-weight:700; cursor:pointer;">点击查看详情</button>
+        </div>
+      </div>
+    `
+  }, [escapeMarkerText])
+
+  // 将交互函数挂到 window 上，供高德 InfoWindow HTML 内联事件调用
+  useEffect(() => {
+    const w = window as any
+    w.__podcasthubOpenStudio = (id: number) => {
+      const studio = studios.find(s => s.id === id)
+      if (studio) openStudioModal(studio)
+    }
+    w.__podcasthubHoverEnter = () => cancelHoverClose()
+    w.__podcasthubHoverLeave = () => scheduleHoverClose()
+    return () => {
+      delete w.__podcasthubOpenStudio
+      delete w.__podcasthubHoverEnter
+      delete w.__podcasthubHoverLeave
+    }
+  }, [studios, openStudioModal, cancelHoverClose, scheduleHoverClose])
+
   const closeStudioModal = useCallback(() => {
     detailRequestIdRef.current += 1
     setModalOpen(false)
@@ -213,54 +357,6 @@ export default function HomePage() {
     setModalLoading(false)
   }, [])
 
-  const buildStudioHoverNode = useCallback((studio: StudioListItem) => {
-    const wrapper = document.createElement('div')
-    wrapper.innerHTML = buildStudioHoverContent(studio)
-    const card = wrapper.firstElementChild as HTMLDivElement | null
-    if (!card) return wrapper
-
-    card.addEventListener('mouseenter', () => {
-      cancelHoverClose()
-      hoverInfoRef.current?.open(mapRef.current, [studio.longitude, studio.latitude])
-    })
-
-    card.addEventListener('mouseleave', () => {
-      scheduleHoverClose()
-    })
-
-    card.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      openStudioModal(studio)
-    })
-
-    const footer = document.createElement('div')
-    footer.style.marginTop = '10px'
-    footer.style.paddingTop = '10px'
-    footer.style.borderTop = '1px solid rgba(148, 163, 184, 0.18)'
-
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = '点击查看详情'
-    button.style.width = '100%'
-    button.style.padding = '10px 12px'
-    button.style.borderRadius = '12px'
-    button.style.border = '0'
-    button.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)'
-    button.style.color = '#fff'
-    button.style.fontSize = '12px'
-    button.style.fontWeight = '700'
-    button.style.cursor = 'pointer'
-    button.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      openStudioModal(studio)
-    })
-
-    footer.appendChild(button)
-    card.appendChild(footer)
-    return card
-  }, [buildStudioHoverContent, cancelHoverClose, openStudioModal, scheduleHoverClose])
 
   const buildHubMarkerContent = useCallback((shortName: string) => {
     return `
@@ -281,39 +377,101 @@ export default function HomePage() {
     `
   }, [escapeMarkerText])
 
-  const getStudioOpenHours = useCallback((studio: Studio | null) => {
-    if (!studio?.description) return null
-    const match = studio.description.match(/开放时间[:：]\s*([^\n]+)/)
-    return match?.[1]?.trim() || null
-  }, [])
+  const buildCityAggregateMarkerContent = useCallback((cityName: string, count: number) => {
+    return `
+      <div style="display:flex; flex-direction:column; align-items:center; transform: translateY(-8px);">
+        <div style="display:flex; align-items:center; gap:6px; padding:8px 12px; border-radius:16px; background:rgba(17,24,39,0.94); box-shadow:0 16px 30px rgba(15,23,42,0.18); color:#fff; white-space:nowrap;">
+          <div style="font-size:13px; font-weight:700; line-height:1;">${escapeMarkerText(cityName)}</div>
+          <div style="min-width:24px; height:24px; padding:0 8px; border-radius:999px; background:#fff; color:#111827; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; line-height:1;">${count}</div>
+        </div>
+        <div style="margin-top:8px; width:12px; height:12px; border-radius:999px; background:#111827; box-shadow:0 0 0 6px rgba(17,24,39,0.12);"></div>
+      </div>
+    `
+  }, [escapeMarkerText])
+
+  const buildCityAggregateHoverContent = useCallback((cityName: string, count: number) => {
+    return `
+      <div style="width: 220px; background: rgba(255,255,255,0.98); border: 1px solid rgba(226,232,240,0.9); border-radius: 18px; box-shadow: 0 18px 50px rgba(15,23,42,0.16); padding: 14px 14px 12px;">
+        <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #64748b; margin-bottom: 6px;">全国概览</div>
+        <div style="font-size: 16px; font-weight: 800; color: #111827; line-height: 1.35;">${escapeMarkerText(cityName)}</div>
+        <div style="margin-top: 6px; font-size: 12px; color: #475569; line-height: 1.5;">当前收录 <strong>${count}</strong> 家录音间</div>
+        <div style="margin-top: 10px; font-size: 11px; font-weight: 700; color: #111827;">点击查看城市内具体录音间</div>
+      </div>
+    `
+  }, [escapeMarkerText])
 
   const loadStudios = useCallback((city?: string) => {
     studiosRequestIdRef.current += 1
     const requestId = studiosRequestIdRef.current
+    const cacheKey = getStudiosCacheKey(city)
+
+    setStudiosLoading(true)
+
+    if (typeof window !== 'undefined') {
+      const cached = window.sessionStorage.getItem(cacheKey)
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as { timestamp: number; items: StudioListItem[] }
+          if (Date.now() - parsed.timestamp < STUDIOS_CACHE_TTL) {
+            setStudios(parsed.items)
+            setStudiosLoading(false)
+          }
+        } catch {
+          window.sessionStorage.removeItem(cacheKey)
+        }
+      }
+    }
 
     return studiosApi.list({ city, size: 100 })
       .then(res => {
         if (studiosRequestIdRef.current === requestId) {
           setStudios(res.data.items)
+          setStudiosLoading(false)
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem(cacheKey, JSON.stringify({
+              timestamp: Date.now(),
+              items: res.data.items,
+            }))
+          }
         }
       })
       .catch(() => {
         if (studiosRequestIdRef.current === requestId) {
           setStudios([])
+          setStudiosLoading(false)
         }
       })
   }, [])
 
-  // 加载录音间数据
+  // 加载录音间数据（等待默认城市确定后再加载）
   useEffect(() => {
-    if (activeTab !== 'map') return
-    loadStudios()
-  }, [activeTab, loadStudios])
+    if (selectedCity === null) return
+    loadStudios(selectedCity || undefined)
+  }, [loadStudios, selectedCity])
 
-  // 更新地图标记
+  const handleCitySelect = useCallback((city: string) => {
+    setSelectedCity(city) // selectedCity effect 会自动触发 loadStudios
+    closeStudioModal()
+    hoverInfoRef.current?.close()
+
+    if (!mapRef.current) return
+
+    if (!city) {
+      mapRef.current.setCenter(NATIONAL_MAP_CENTER)
+      mapRef.current.setZoom(NATIONAL_MAP_ZOOM)
+      return
+    }
+
+    if (CITY_CENTERS[city]) {
+      mapRef.current.setCenter(CITY_CENTERS[city])
+      mapRef.current.setZoom(11.5)
+    }
+  }, [closeStudioModal])
+
+  // 更新地图标记（依赖 isMapReady 状态而非 ref，确保地图后 ready 时也能补绘）
   useEffect(() => {
+    if (!isMapReady || !mapRef.current || studios.length === 0) return
     const AMap = (window as any).AMap
-    if (!AMap || !mapRef.current || studios.length === 0) return
 
     // 清除旧标记
     markersRef.current.forEach(m => mapRef.current.remove(m))
@@ -324,9 +482,69 @@ export default function HomePage() {
     const validStudios = studios.filter(s => s.longitude && s.latitude)
     if (validStudios.length === 0) return
 
+    if (selectedCity === '') {
+      const cityAggregates = Object.values(validStudios.reduce<Record<string, {
+        city: string
+        count: number
+        longitudeSum: number
+        latitudeSum: number
+      }>>((acc, studio) => {
+        const city = studio.city || '未标注城市'
+        if (!acc[city]) {
+          acc[city] = { city, count: 0, longitudeSum: 0, latitudeSum: 0 }
+        }
+        acc[city].count += 1
+        acc[city].longitudeSum += studio.longitude as number
+        acc[city].latitudeSum += studio.latitude as number
+        return acc
+      }, {}))
+
+      cityAggregates.forEach(aggregate => {
+        const fallbackCenter: [number, number] = [
+          aggregate.longitudeSum / aggregate.count,
+          aggregate.latitudeSum / aggregate.count,
+        ]
+        const markerPosition = CITY_CENTERS[aggregate.city] || fallbackCenter
+        const marker = new AMap.Marker({
+          position: markerPosition,
+          title: `${aggregate.city} · ${aggregate.count} 家录音间`,
+          content: buildCityAggregateMarkerContent(aggregate.city, aggregate.count),
+          offset: new AMap.Pixel(-28, -40),
+          zIndex: 110,
+        })
+
+        marker.on('mouseover', () => {
+          cancelHoverClose()
+          hoverInfoRef.current?.setContent(buildCityAggregateHoverContent(aggregate.city, aggregate.count))
+          hoverInfoRef.current?.open(mapRef.current, markerPosition)
+        })
+
+        marker.on('mouseout', () => {
+          scheduleHoverClose()
+        })
+
+        marker.on('click', () => {
+          cancelHoverClose()
+          handleCitySelect(aggregate.city)
+        })
+
+        mapRef.current.add(marker)
+        markersRef.current.push(marker)
+      })
+
+      if (markersRef.current.length > 0) {
+        mapRef.current.setFitView(markersRef.current, false, [80, 110, 80, 140])
+      } else {
+        mapRef.current.setCenter(NATIONAL_MAP_CENTER)
+        mapRef.current.setZoom(NATIONAL_MAP_ZOOM)
+      }
+      return
+    }
+
     const hubOverlays: any[] = []
-    if (selectedCity === '' || selectedCity === '上海') {
-      SHANGHAI_HUBS.forEach(hub => {
+    const cityHubs = getCityHubs(selectedCity)
+    if (cityHubs) {
+      cityHubs.forEach(hub => {
         const hubMarker = new AMap.Marker({
           position: [hub.longitude, hub.latitude],
           title: hub.name,
@@ -372,7 +590,7 @@ export default function HomePage() {
 
       marker.on('mouseover', () => {
         cancelHoverClose()
-        hoverInfoRef.current?.setContent(buildStudioHoverNode(studio))
+        hoverInfoRef.current?.setContent(buildStudioHoverContent(studio))
         hoverInfoRef.current?.open(mapRef.current, [studio.longitude, studio.latitude])
       })
 
@@ -390,204 +608,157 @@ export default function HomePage() {
       markersRef.current.push(marker)
     })
 
-    // 自适应缩放，刚好容纳所有标记
+    // 首屏视野优先围绕录音室主分布，交通枢纽不参与 fitView
+    // 原因：浦东机场等远距离枢纽会把整体视野拉大，导致录音室被挤到偏左
     if (validStudios.length > 0) {
-      mapRef.current.setFitView([...markersRef.current, ...hubOverlays], false, [50, 50, 50, 350])
+      mapRef.current.setFitView(markersRef.current, false, [80, 120, 80, 120])
     }
-  }, [buildHubHoverContent, buildHubMarkerContent, buildStudioHoverNode, cancelHoverClose, escapeMarkerText, openStudioModal, scheduleHoverClose, selectedCity, studios])
+  }, [buildCityAggregateHoverContent, buildCityAggregateMarkerContent, buildHubHoverContent, buildHubMarkerContent, buildStudioHoverContent, cancelHoverClose, handleCitySelect, isMapReady, scheduleHoverClose, selectedCity, studios])
 
-  const handleCitySelect = (city: string) => {
-    setSelectedCity(city)
-    closeStudioModal()
-    hoverInfoRef.current?.close()
-    loadStudios(city || undefined)
-
-    // 移动地图到对应城市
-    const cityCenters: Record<string, [number, number]> = {
-      '上海': [121.47, 31.23],
-      '北京': [116.40, 39.90],
-      '深圳': [114.06, 22.55],
-      '广州': [113.26, 23.13],
-      '成都': [104.07, 30.67],
-      '杭州': [120.15, 30.28],
-    }
-    if (city && cityCenters[city] && mapRef.current) {
-      mapRef.current.setCenter(cityCenters[city])
-      mapRef.current.setZoom(12)
-    }
-  }
-
-  // 地图 Tab
-  if (activeTab === 'map') {
-    return (
-      <div className="relative h-[calc(100vh-48px)] sm:h-[calc(100vh-48px)] -m-4 sm:-m-6">
+  // 地图总览页
+  return (
+    <>
+      <div className="relative h-[calc(100vh-96px)] sm:h-[calc(100vh-48px)]">
+        {/* SEO: 首页主标题，视觉隐藏但搜索引擎可见 */}
+        <h1 className="sr-only">PodcastHub - 中国播客录音室展示与选择平台</h1>
         {/* 地图容器 */}
         <div ref={mapContainer} className="w-full h-full" />
 
-        {/* 顶部城市筛选 */}
+        {(mapLoading || studiosLoading || mapError) && (
+          <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-white/72 backdrop-blur-[2px]">
+            <div className="rounded-3xl border border-black/8 bg-white px-5 py-4 text-center shadow-[0_18px_48px_rgba(15,23,42,0.08)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                {mapError ? '地图加载受阻' : '地图准备中'}
+              </div>
+              <div className="mt-2 text-sm text-slate-700">
+                {mapError
+                  ? '高德地图脚本加载失败，请稍后刷新重试。'
+                  : mapLoading
+                    ? '正在连接地图服务...'
+                    : '正在同步录音间点位...'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 顶部城市筛选（动态城市列表） */}
         <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-2">
           <div className="flex gap-1.5 overflow-x-auto bg-white/90 backdrop-blur-lg rounded-xl px-2 py-1.5 shadow-sm border border-gray-100/60 city-scroll">
-            {CITIES.map(c => (
+            <button
+              onClick={() => handleCitySelect('')}
+              className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                selectedCity === ''
+                  ? 'bg-black text-white'
+                  : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              全部
+            </button>
+            {cities.map(city => (
               <button
-                key={c.value}
-                onClick={() => handleCitySelect(c.value)}
-                className="px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all text-gray-500 hover:bg-gray-50"
+                key={city}
+                onClick={() => handleCitySelect(city)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                  selectedCity === city
+                    ? 'bg-black text-white'
+                    : 'text-gray-500 hover:bg-gray-50'
+                }`}
               >
-                {c.label}
+                {city}
               </button>
             ))}
           </div>
-          <div className="flex gap-1 bg-white/90 backdrop-blur-lg rounded-xl px-1 py-1 shadow-sm border border-gray-100/60">
-            <button onClick={() => setActiveTab('map')} className="px-3 py-1 rounded-lg text-xs font-medium bg-amber-50 text-amber-600">录音间</button>
-            <button onClick={() => setActiveTab('editors')} className="px-3 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-gray-600">剪辑师</button>
-            <button onClick={() => setActiveTab('business')} className="px-3 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-gray-600">商务</button>
-          </div>
         </div>
+
+        <StudioRecruitmentFab />
 
         {modalOpen && (
           <div className="absolute inset-0 z-30 bg-black/22 backdrop-blur-[2px] px-4 py-6 sm:px-8 sm:py-10" onClick={closeStudioModal}>
-            <div className="mx-auto flex h-full max-w-5xl items-center justify-center">
-              <div className="w-full max-h-full overflow-hidden rounded-[28px] border border-black/10 bg-white shadow-[0_28px_80px_rgba(0,0,0,0.16)]" onClick={e => e.stopPropagation()}>
-                <div className="grid max-h-[88vh] grid-cols-1 overflow-hidden lg:grid-cols-[1.05fr_0.95fr]">
-                  <div className="relative min-h-[260px] bg-gradient-to-br from-neutral-100 via-neutral-50 to-white lg:min-h-[620px]">
-                    {selectedStudio?.cover_image ? (
-                      <img src={selectedStudio.cover_image} alt={selectedStudio.name} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center">
-                        <div className="rounded-[24px] border border-black/5 bg-white px-8 py-6 text-center shadow-sm">
-                          <div className="text-6xl opacity-70">🎙</div>
-                          <div className="mt-3 text-sm font-medium text-slate-500">录音间实景图待补充</div>
-                        </div>
-                      </div>
-                    )}
-                    <button onClick={closeStudioModal} className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white text-xl text-slate-500 shadow-sm hover:text-slate-700">
-                      &times;
+            <div className="mx-auto flex h-full max-w-2xl items-center justify-center">
+              <div className="w-full max-h-[88vh] overflow-hidden rounded-[28px] border border-black/10 bg-white shadow-[0_28px_80px_rgba(0,0,0,0.16)]" onClick={e => e.stopPropagation()}>
+                {/* 关闭按钮 */}
+                <div className="flex items-center justify-between px-6 pt-5 sm:px-8">
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => setActiveDetailTab('info')}
+                      className={`text-sm font-medium pb-1.5 border-b-2 transition-colors ${
+                        activeDetailTab === 'info'
+                          ? 'text-slate-900 border-slate-900'
+                          : 'text-slate-400 border-transparent hover:text-slate-600'
+                      }`}
+                    >
+                      录音室信息
+                    </button>
+                    <button
+                      onClick={() => setActiveDetailTab('image')}
+                      className={`text-sm font-medium pb-1.5 border-b-2 transition-colors ${
+                        activeDetailTab === 'image'
+                          ? 'text-slate-900 border-slate-900'
+                          : 'text-slate-400 border-transparent hover:text-slate-600'
+                      }`}
+                    >
+                      图片
                     </button>
                   </div>
+                  <button onClick={closeStudioModal} className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:text-slate-700 transition-colors">
+                    &times;
+                  </button>
+                </div>
 
-                  <div className="max-h-[88vh] overflow-y-auto p-6 sm:p-7 lg:p-8">
-                    {modalLoading ? (
-                      <div className="flex min-h-[420px] items-center justify-center text-sm text-slate-400">加载详情中...</div>
-                    ) : selectedStudio ? (
-                      <div className="space-y-5">
-                        <div>
-                          <div className="mb-3 inline-flex rounded-full border border-black/10 bg-black px-3 py-1 text-[11px] font-semibold text-white">录音间详情</div>
-                          <h2 className="text-2xl font-bold tracking-tight text-slate-900">{selectedStudio.name}</h2>
-                          <p className="mt-2 text-sm text-slate-500">{[selectedStudio.city, selectedStudio.district].filter(Boolean).join(' · ') || '上海'}</p>
-                          {selectedStudio.address && <p className="mt-1 text-sm leading-relaxed text-slate-400">{selectedStudio.address}</p>}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="rounded-2xl border border-black/6 bg-neutral-50 px-4 py-3">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">价格</div>
-                            <div className="mt-1 text-base font-bold text-slate-900">
-                              {selectedStudio.price_per_hour ? `¥${selectedStudio.price_per_hour}/时` : selectedStudio.price_per_day ? `¥${selectedStudio.price_per_day}/天` : '价格详询'}
-                            </div>
-                          </div>
-                          <div className="rounded-2xl border border-black/6 bg-neutral-50 px-4 py-3">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">房间数</div>
-                            <div className="mt-1 text-base font-bold text-slate-800">{selectedStudio.room_count || 1} 间</div>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <div className="rounded-2xl border border-black/6 bg-neutral-50 px-4 py-3">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">开放时间</div>
-                            <div className="mt-1 text-sm font-medium leading-6 text-slate-700">
-                              {getStudioOpenHours(selectedStudio) || selectedStudio.booking_note || '建议预约前联系确认开放时段'}
-                            </div>
-                          </div>
-                          <div className="rounded-2xl border border-black/6 bg-neutral-50 px-4 py-3">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">联系方式</div>
-                            <div className="mt-1 space-y-1 text-sm leading-6 text-slate-700">
-                              {selectedStudio.contact_name && <p>联系人：{selectedStudio.contact_name}</p>}
-                              {selectedStudio.contact_phone && <p>电话：{selectedStudio.contact_phone}</p>}
-                              {selectedStudio.contact_wechat && <p>微信：{selectedStudio.contact_wechat}</p>}
-                              {!selectedStudio.contact_name && !selectedStudio.contact_phone && !selectedStudio.contact_wechat && (
-                                <p>暂无公开联系方式，可先通过预约方式或详情页进一步确认。</p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="rounded-3xl border border-black/6 bg-neutral-50 p-4">
-                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-500">地点信息</div>
-                          <div className="mt-2 space-y-2 text-sm text-slate-600">
-                            <p>城市区域：{[selectedStudio.city, selectedStudio.district].filter(Boolean).join(' / ') || '待补充'}</p>
-                            <p>详细地址：{selectedStudio.address || '待补充'}</p>
-                          </div>
-                        </div>
-
-                        <div className="rounded-3xl border border-black/6 bg-white p-4">
-                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-500">具体描述</div>
-                          <p className="mt-2 text-sm leading-7 text-slate-600 whitespace-pre-line">{selectedStudio.description || '暂无详细描述，建议联系主理人确认录音环境、设备和档期。'}</p>
-                        </div>
-
-                        <div className="rounded-3xl border border-black/6 bg-neutral-50 p-4">
-                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-500">预约方式</div>
-                          <div className="mt-3 space-y-3">
-                            {selectedStudio.booking_url ? (
-                              <a href={selectedStudio.booking_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
-                                立即预约
-                              </a>
-                            ) : (
-                              <div className="rounded-2xl border border-black/6 bg-white px-4 py-3 text-sm text-slate-500">暂无线上预约链接</div>
-                            )}
-                            <p className="text-sm leading-6 text-slate-600">{selectedStudio.booking_note || '可通过页面联系方式进一步确认预约方式。'}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3">
-                          <Link href={`/studios/${selectedStudio.id}`} className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-slate-800">
-                            打开独立详情页
-                          </Link>
-                          <button onClick={closeStudioModal} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-200">
-                            关闭
-                          </button>
-                        </div>
+                {/* Tab 内容 */}
+                <div className="max-h-[calc(88vh-52px)] overflow-y-auto px-6 pb-6 sm:px-8 sm:pb-8">
+                  {selectedStudio ? (
+                    activeDetailTab === 'info' ? (
+                      <div className="pt-5">
+                        <StudioDetailInfoTab
+                          studio={selectedStudio}
+                          onClose={closeStudioModal}
+                          onStudioFeedback={() => setStudioFeedbackOpen(true)}
+                        />
                       </div>
                     ) : (
-                      <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
-                        <div className="text-4xl">🤷</div>
-                        <p className="mt-3 text-sm text-slate-400">详情加载失败，请稍后重试</p>
+                      <StudioDetailImageTab studio={selectedStudio} />
+                    )
+                  ) : modalLoading && selectedPreview ? (
+                    /* 详情加载中，先用 preview 展示名称 + 地址骨架 */
+                    <div className="pt-5 space-y-6">
+                      <div>
+                        <h2 className="text-2xl font-bold tracking-tight text-slate-900">{selectedPreview.name}</h2>
+                        <p className="mt-2 text-sm text-slate-500">{selectedPreview.address || '地址待补充'}</p>
                       </div>
-                    )}
-                  </div>
+                      <div className="space-y-4 animate-pulse">
+                        <div className="h-4 bg-slate-100 rounded w-32" />
+                        <div className="h-20 bg-slate-50 rounded-xl" />
+                        <div className="h-4 bg-slate-100 rounded w-24" />
+                        <div className="h-16 bg-slate-50 rounded-xl" />
+                      </div>
+                    </div>
+                  ) : !modalLoading && !selectedStudio ? (
+                    <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
+                      <div className="text-4xl">🤷</div>
+                      <p className="mt-3 text-sm text-slate-400">详情加载失败，请稍后重试</p>
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-400">加载详情中...</div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* 移动端底部 Tab */}
-        <div className="sm:hidden absolute bottom-0 left-0 right-0 z-10 bg-white/90 backdrop-blur-lg border-t border-gray-100 pb-safe">
-          <div className="flex justify-around h-11">
-            <button onClick={() => setActiveTab('map')} className="flex flex-col items-center justify-center flex-1 text-amber-600"><span className="text-[10px] font-medium">录音间</span></button>
-            <button onClick={() => setActiveTab('editors')} className="flex flex-col items-center justify-center flex-1 text-gray-400"><span className="text-[10px] font-medium">剪辑师</span></button>
-            <button onClick={() => setActiveTab('business')} className="flex flex-col items-center justify-center flex-1 text-gray-400"><span className="text-[10px] font-medium">商务</span></button>
-          </div>
-        </div>
       </div>
-    )
-  }
 
-  // 剪辑师 Tab
-  if (activeTab === 'editors') {
-    return (
-      <div className="py-8 text-center animate-fade-in-up">
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight mb-2">剪辑师</h1>
-        <p className="text-sm text-gray-400 mb-6">功能开发中，敬请期待</p>
-        <Link href="/editors" className="text-sm text-purple-500 hover:underline">查看剪辑师列表 →</Link>
-      </div>
-    )
-  }
-
-  // 商务 Tab
-  return (
-    <div className="py-8 text-center animate-fade-in-up">
-      <h1 className="text-2xl font-bold text-gray-900 tracking-tight mb-2">商务资源</h1>
-      <p className="text-sm text-gray-400 mb-6">功能开发中，敬请期待</p>
-      <Link href="/business" className="text-sm text-blue-500 hover:underline">查看商务列表 →</Link>
-    </div>
+      {/* 录音室信息反馈弹窗 */}
+      <FeedbackModal
+        open={studioFeedbackOpen}
+        onClose={() => setStudioFeedbackOpen(false)}
+        studioContext={selectedStudio ? {
+          studio_id: selectedStudio.id,
+          studio_name: selectedStudio.name,
+          source: 'web_modal' as const,
+        } : undefined}
+      />
+    </>
   )
 }

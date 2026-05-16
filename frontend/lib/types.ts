@@ -1,24 +1,37 @@
 // TypeScript 类型定义
 
+export interface CityWithCount {
+  city: string
+  count: number
+}
+
 export interface Studio {
   id: number
   name: string
   cover_image: string | null
   description: string | null
+  open_hours: string | null
   city: string | null
   district: string | null
   address: string | null
+  longitude: number | null
+  latitude: number | null
   equipment: string[] | null
   room_count: number
   room_features: string[] | null
+  capacity: number | null
+  need_own_equipment_for_video: boolean | null
   price_per_hour: number | null
   price_per_day: number | null
   price_note: string | null
+  charging_method: string | null
   booking_url: string | null
   booking_note: string | null
+  booking_qr_image: string | null
   contact_name: string | null
   contact_phone: string | null
   contact_wechat: string | null
+  contact_info: string | null
   portfolio_images: string[] | null
   portfolio_links: string[] | null
   tags: string[] | null
@@ -36,9 +49,13 @@ export interface StudioListItem {
   address: string | null
   longitude: number | null
   latitude: number | null
+  capacity: number | null
+  need_own_equipment_for_video: boolean | null
+  contact_info: string | null
   price_per_hour: number | null
   price_per_day: number | null
   tags: string[] | null
+  charging_method: string | null
   is_active: boolean
 }
 
@@ -47,10 +64,13 @@ export interface Editor {
   name: string
   avatar: string | null
   bio: string | null
+  editor_type: string | null
+  availability_status: string | null
   skills: string[] | null
   software: string[] | null
   experience_years: number
   specialties: string[] | null
+  strengths: string | null
   price_per_episode: number | null
   price_per_hour: number | null
   price_note: string | null
@@ -60,6 +80,8 @@ export interface Editor {
   portfolio_url: string | null
   portfolio_images: string[] | null
   portfolio_links: string[] | null
+  portfolio_works: string | null
+  coop_review: string | null
   tags: string[] | null
   rating: number
   is_active: boolean
@@ -71,9 +93,14 @@ export interface EditorListItem {
   id: number
   name: string
   avatar: string | null
+  editor_type: string | null
+  availability_status: string | null
+  bio: string | null
   skills: string[] | null
   experience_years: number
   price_per_episode: number | null
+  price_note: string | null
+  portfolio_works: string | null
   tags: string[] | null
   is_active: boolean
 }
@@ -119,4 +146,15 @@ export interface PaginatedResponse<T> {
   total: number
   page: number
   size: number
+}
+
+export interface StudioReview {
+  id: number
+  studio_id: number
+  rating: number | null
+  content: string
+  nickname: string | null
+  status: string
+  source: string
+  created_at: string | null
 }
