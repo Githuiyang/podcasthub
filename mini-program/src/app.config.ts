@@ -1,0 +1,28 @@
+export default defineAppConfig({
+  pages: [
+    'pages/studios/index',
+    'pages/creators/index',
+    'pages/studio-detail/index',
+    'pages/creator-detail/index',
+    'pages/submit-studio/index',
+    'pages/feedback/index',
+    'pages/admin-login/index',
+    'pages/admin/index',
+  ],
+  window: {
+    backgroundTextStyle: 'light',
+    navigationBarBackgroundColor: '#ffffff',
+    navigationBarTitleText: 'PodcastHub',
+    navigationBarTextStyle: 'black',
+  },
+  tabBar: {
+    color: '#999999',
+    selectedColor: '#111827',
+    backgroundColor: '#ffffff',
+    borderStyle: 'white',
+    list: [
+      { pagePath: 'pages/studios/index', text: '录音室' },
+      { pagePath: 'pages/creators/index', text: '创作者' },
+    ],
+  },
+})

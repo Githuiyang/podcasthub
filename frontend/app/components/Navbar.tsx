@@ -5,6 +5,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { FeedbackModal } from './FeedbackModal'
 
+/**
+ * 顶层导航 — 四个主入口 + 提交录音室 + 反馈
+ *
+ * 主入口：首页 / 录音间 / 剪辑师 / 商务
+ * 桌面端：主入口 + 提交录音室按钮 + 反馈
+ * 移动端：顶栏反馈 + 底部 Tab 四入口
+ */
 const navLinks = [
   { href: '/', label: '首页' },
   { href: '/studios', label: '录音间' },
@@ -42,6 +49,12 @@ export function Navbar() {
                 {link.label}
               </Link>
             ))}
+            <Link
+              href="/submit-studio"
+              className="ml-1 rounded-lg bg-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+            >
+              添加我的录音室
+            </Link>
             <div className="w-px h-4 bg-gray-200 mx-1" />
             <button
               onClick={() => setFeedbackOpen(true)}
@@ -51,13 +64,18 @@ export function Navbar() {
             </button>
           </div>
 
-          {/* 移动端菜单按钮 */}
-          <button
-            onClick={() => setFeedbackOpen(true)}
-            className="sm:hidden text-xs text-gray-400 px-2 py-1"
-          >
-            反馈
-          </button>
+          {/* 移动端顶栏右侧 */}
+          <div className="sm:hidden flex items-center gap-2">
+            <Link href="/submit-studio" className="rounded-lg bg-black px-2.5 py-1.5 text-[11px] font-semibold text-white">
+              添加录音室
+            </Link>
+            <button
+              onClick={() => setFeedbackOpen(true)}
+              className="text-xs text-gray-400 px-2 py-1"
+            >
+              反馈
+            </button>
+          </div>
         </div>
       </nav>
 

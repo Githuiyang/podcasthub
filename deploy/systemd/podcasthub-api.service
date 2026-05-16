@@ -1,0 +1,20 @@
+[Unit]
+Description=PodcastHub FastAPI API
+After=network.target
+
+[Service]
+Type=simple
+User=podcasthub
+Group=podcasthub
+WorkingDirectory=/opt/podcasthub/backend
+EnvironmentFile=/etc/podcasthub/podcasthub-api.env
+Environment=GUNICORN_BIN=/opt/podcasthub/backend/.venv/bin/gunicorn
+ExecStart=/opt/podcasthub/deploy/start-backend.sh
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+

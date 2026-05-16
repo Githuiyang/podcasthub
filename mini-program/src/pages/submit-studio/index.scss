@@ -1,0 +1,58 @@
+.page-submit {
+  min-height: 100vh;
+  background-color: #f9fafb;
+  padding: 32px;
+}
+
+.submit-card {
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 40px 32px;
+}
+
+.submit-title {
+  display: block;
+  font-size: 36px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 20px;
+}
+
+.submit-desc {
+  display: block;
+  font-size: 26px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin-bottom: 32px;
+}
+
+.submit-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.step-text {
+  font-size: 24px;
+  color: #374151;
+}
+
+.submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88px;
+  background-color: #111827;
+  border-radius: 14px;
+}
+
+.submit-btn:active {
+  opacity: 0.85;
+}
+
+.submit-btn-text {
+  font-size: 28px;
+  font-weight: 500;
+  color: #ffffff;
+}

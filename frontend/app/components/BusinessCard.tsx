@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import type { BusinessListItem } from '@/lib/types'
 
 interface BusinessCardProps {
@@ -15,7 +16,7 @@ export function BusinessCard({ contact }: BusinessCardProps) {
           {/* 头像 */}
           <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden">
             {contact.avatar ? (
-              <img src={contact.avatar} alt={contact.name} className="w-full h-full object-cover" />
+              <Image src={contact.avatar} alt={contact.name} width={56} height={56} className="w-full h-full object-cover" />
             ) : (
               '🤝'
             )}

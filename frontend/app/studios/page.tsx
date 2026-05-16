@@ -1,55 +1,51 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { studiosApi } from '@/lib/api'
+import { useState } from 'react'
+import { useCities, useStudiosList } from '@/lib/fetcher'
+import { extractCityNames } from '@/lib/studioCities'
 import type { StudioListItem } from '@/lib/types'
 import { StudioCard } from '@/app/components/StudioCard'
 import { CityFilter } from '@/app/components/CityFilter'
 import { SearchBar } from '@/app/components/SearchBar'
 import { EmptyState } from '@/app/components/EmptyState'
 import { LoadingState } from '@/app/components/LoadingState'
+import { useDebounce } from '@/lib/useDebounce'
 import Link from 'next/link'
 
 export default function StudiosPage() {
-  const [studios, setStudios] = useState<StudioListItem[]>([])
-  const [cities, setCities] = useState<string[]>([])
   const [selectedCity, setSelectedCity] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [total, setTotal] = useState(0)
+  const debouncedSearch = useDebounce(search, 300)
 
-  useEffect(() => {
-    studiosApi.cities().then(res => setCities(res.data)).catch(() => {})
-  }, [])
+  const { data: citiesData } = useCities()
+  const cities = citiesData ? extractCityNames(citiesData) : []
 
-  useEffect(() => {
-    setLoading(true)
-    studiosApi
-      .list({ city: selectedCity || undefined, search: search || undefined })
-      .then(res => {
-        setStudios(res.data.items)
-        setTotal(res.data.total)
-      })
-      .catch(() => setStudios([]))
-      .finally(() => setLoading(false))
-  }, [selectedCity, search])
+  const { data, isLoading } = useStudiosList({
+    city: selectedCity || undefined,
+    search: debouncedSearch || undefined,
+  })
+
+  const studios: StudioListItem[] = data?.items ?? []
+  const total = data?.total ?? 0
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-16 sm:pb-0 animate-fade-in-up">
       {/* 页头 */}
-      <div className="flex items-end justify-between mb-5">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">录音间</h1>
-          <p className="text-xs text-gray-400 mt-1">
-            {loading ? '加载中...' : `共 ${total} 个录音间`}
-          </p>
+      <div className="mb-6">
+        <div className="flex items-end justify-between mb-1">
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">查找播客录音室</h1>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/submit-studio"
+              className="px-3.5 py-2 border border-slate-200 text-slate-500 text-xs font-medium rounded-xl hover:bg-slate-50 hover:border-slate-300 hover:text-slate-700 transition-colors"
+            >
+              提交录音室信息
+            </Link>
+          </div>
         </div>
-        <Link
-          href="/studios/new"
-          className="px-3.5 py-2 bg-studio-500 text-white text-xs font-medium rounded-xl hover:bg-studio-600 transition-colors active:scale-[0.97]"
-        >
-          + 添加
-        </Link>
+        <p className="text-sm text-slate-400">
+          浏览、搜索和对比全国录音间，找到最适合你的那一个
+        </p>
       </div>
 
       {/* 搜索 */}
@@ -57,7 +53,7 @@ export default function StudiosPage() {
         <SearchBar
           value={search}
           onChange={setSearch}
-          placeholder="搜索录音间..."
+          placeholder="按名称搜索录音间..."
         />
       </div>
 
@@ -72,14 +68,21 @@ export default function StudiosPage() {
         </div>
       )}
 
+      {/* 结果统计 */}
+      {!isLoading && studios.length > 0 && (
+        <div className="text-xs text-slate-400 mb-4">
+          {selectedCity ? `${selectedCity} · ` : ''}共 {total} 个录音间
+        </div>
+      )}
+
       {/* 内容 */}
-      {loading ? (
+      {isLoading ? (
         <LoadingState />
       ) : studios.length === 0 ? (
         <EmptyState
           icon="🎙"
           message={selectedCity ? `${selectedCity}暂无录音间` : '暂无录音间信息'}
-          action={{ label: '添加第一个录音间', href: '/studios/new' }}
+          action={{ label: '提交录音室信息', href: '/submit-studio' }}
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">

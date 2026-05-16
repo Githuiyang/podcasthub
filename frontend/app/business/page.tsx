@@ -7,32 +7,34 @@ import { BusinessCard } from '@/app/components/BusinessCard'
 import { SearchBar } from '@/app/components/SearchBar'
 import { EmptyState } from '@/app/components/EmptyState'
 import { LoadingState } from '@/app/components/LoadingState'
+import { useDebounce } from '@/lib/useDebounce'
 import Link from 'next/link'
 
 export default function BusinessPage() {
   const [contacts, setContacts] = useState<BusinessListItem[]>([])
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
 
   useEffect(() => {
     setLoading(true)
     businessApi
-      .list({ search: search || undefined })
+      .list({ search: debouncedSearch || undefined })
       .then(res => {
         setContacts(res.data.items)
         setTotal(res.data.total)
       })
       .catch(() => setContacts([]))
       .finally(() => setLoading(false))
-  }, [search])
+  }, [debouncedSearch])
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-16 sm:pb-0">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">商务资源</h1>
-          <p className="text-sm text-gray-500 mt-1">共 {total} 条商务信息</p>
+          <h1 className="text-2xl font-bold text-slate-900">商务合作</h1>
+          <p className="text-sm text-slate-400 mt-1">播客生态商务对接</p>
         </div>
         <Link
           href="/business/new"
